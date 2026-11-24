@@ -1,0 +1,261 @@
+[
+  {
+    "id": "tab_smart_garage_pro",
+    "type": "tab",
+    "label": "Smart Garage Pro Dashboard",
+    "disabled": false,
+    "info": "Smart Garage Pro: 6-Truck RFID Yard + Ground & First Floor (2-IR, DHT11, Smoke, Flame) + Auto Excel CSV + Google Sheets"
+  },
+  {
+    "id": "mqtt_broker_pro",
+    "type": "mqtt-broker",
+    "name": "Local MQTT Broker",
+    "broker": "127.0.0.1",
+    "port": "1883",
+    "clientid": "NodeRED_SmartGarage_Pro",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true
+  },
+  {
+    "id": "ui_tab_garage_pro",
+    "type": "ui_tab",
+    "name": "Smart Garage Pro",
+    "icon": "dashboard",
+    "order": 1,
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "ui_group_garage_pro",
+    "type": "ui_group",
+    "name": "Smart Garage",
+    "tab": "ui_tab_garage_pro",
+    "order": 1,
+    "disp": false,
+    "width": "24",
+    "collapse": false
+  },
+  {
+    "id": "inject_init_pro",
+    "type": "inject",
+    "z": "tab_smart_garage_pro",
+    "name": "Init Default UI & CSV Header",
+    "props": [{ "p": "payload" }],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 0.3,
+    "topic": "init",
+    "payload": "{}",
+    "payloadType": "json",
+    "x": 160,
+    "y": 60,
+    "wires": [["fn_state_manager_pro"]]
+  },
+  {
+    "id": "mqtt_in_telemetry_pro",
+    "type": "mqtt in",
+    "z": "tab_smart_garage_pro",
+    "name": "Garage Telemetry",
+    "topic": "garage/telemetry",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker_pro",
+    "x": 140,
+    "y": 140,
+    "wires": [
+      ["fn_state_manager_pro", "trigger_esp_watchdog_pro", "fn_ack_pro"]
+    ]
+  },
+  {
+    "id": "mqtt_in_gate_pro",
+    "type": "mqtt in",
+    "z": "tab_smart_garage_pro",
+    "name": "Gate & Truck Events",
+    "topic": "garage/gate/event",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker_pro",
+    "x": 140,
+    "y": 220,
+    "wires": [
+      ["fn_state_manager_pro", "trigger_esp_watchdog_pro", "fn_build_log_record_pro"]
+    ]
+  },
+  {
+    "id": "mqtt_in_status_pro",
+    "type": "mqtt in",
+    "z": "tab_smart_garage_pro",
+    "name": "ESP System Status",
+    "topic": "garage/system/status",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker_pro",
+    "x": 140,
+    "y": 300,
+    "wires": [
+      ["fn_state_manager_pro"]
+    ]
+  },
+  {
+    "id": "trigger_esp_watchdog_pro",
+    "type": "trigger",
+    "z": "tab_smart_garage_pro",
+    "name": "ESP32 7s Watchdog",
+    "op1": "",
+    "op2": "OFFLINE",
+    "op1type": "nul",
+    "op2type": "str",
+    "duration": "7",
+    "extend": true,
+    "overrideDelay": false,
+    "units": "s",
+    "reset": "",
+    "bytopic": "all",
+    "topic": "watchdog",
+    "outputs": 1,
+    "x": 420,
+    "y": 260,
+    "wires": [["fn_watchdog_msg_pro"]]
+  },
+  {
+    "id": "fn_watchdog_msg_pro",
+    "type": "function",
+    "z": "tab_smart_garage_pro",
+    "name": "Mark Offline",
+    "func": "return { topic: 'watchdog_offline', payload: {} };",
+    "outputs": 1,
+    "x": 630,
+    "y": 260,
+    "wires": [["fn_state_manager_pro"]]
+  },
+  {
+    "id": "fn_ack_pro",
+    "type": "function",
+    "z": "tab_smart_garage_pro",
+    "name": "2-Way ACK",
+    "func": "return { topic: 'garage/control/nodered_ack', payload: 'OK' };",
+    "outputs": 1,
+    "x": 400,
+    "y": 60,
+    "wires": [["mqtt_out_control_pro"]]
+  },
+  {
+    "id": "fn_build_log_record_pro",
+    "type": "function",
+    "z": "tab_smart_garage_pro",
+    "name": "Format Excel CSV & Google Sheet Row",
+    "func": "const s = flow.get('garage_state') || {};\nconst e = msg.payload || {};\nconst ts = new Date().toLocaleString();\nconst safety = (s.fl2 || s.fl3 || s.d2 || s.d3 || s.intrusion || s.masterAlarm) ? 'EMERGENCY' : 'SAFE';\nconst f1 = (e.f1_cars !== undefined) ? Number(e.f1_cars) : (s.f1 || 0);\nconst f2 = s.f2 || 0;\nconst f3 = s.f3 || 0;\nconst inside = f1 + f2 + f3;\n\nconst record = {\n  timestamp: ts,\n  action: e.action || 'EVENT',\n  truck_id: e.truck_id || 'CAR',\n  rfid: e.rfid || '---',\n  driver: e.driver || 'Unknown',\n  type: e.type || 'Vehicle',\n  f1_cars: f1,\n  f2_cars: f2,\n  f3_cars: f3,\n  total_inside: inside,\n  f2_temp: s.t2 || 0,\n  f2_hum: s.h2 || 0,\n  f2_smoke: s.s2 || 0,\n  f2_flame: s.fl2 ? 1 : 0,\n  f3_temp: s.t3 || 0,\n  f3_hum: s.h3 || 0,\n  f3_smoke: s.s3 || 0,\n  f3_flame: s.fl3 ? 1 : 0,\n  safety_status: safety\n};\n\n// CSV line for local Excel file\nconst csvLine = `\"${record.timestamp}\",\"${record.action}\",\"${record.truck_id}\",\"${record.rfid}\",\"${record.driver}\",\"${record.type}\",${record.f1_cars},${record.f2_cars},${record.f3_cars},${record.total_inside},${record.f2_temp},${record.f2_hum},${record.f2_smoke},\"${record.f2_flame ? 'FIRE' : 'SAFE'}\",${record.f3_temp},${record.f3_hum},${record.f3_smoke},\"${record.f3_flame ? 'FIRE' : 'SAFE'}\",\"${record.safety_status}\"`;\n\nreturn [\n  { payload: csvLine },\n  { payload: record }\n];",
+    "outputs": 2,
+    "x": 450,
+    "y": 380,
+    "wires": [
+      ["file_excel_csv_pro"],
+      ["fn_gsheet_url_pro"]
+    ]
+  },
+  {
+    "id": "file_excel_csv_pro",
+    "type": "file",
+    "z": "tab_smart_garage_pro",
+    "name": "📊 Append Local Excel CSV",
+    "filename": "D:\\storrge\\UNI\\SMART GARAGE proj\\garage_live_log.csv",
+    "filenameType": "str",
+    "appendNewline": true,
+    "createDir": true,
+    "overwriteFile": "false",
+    "encoding": "utf8",
+    "x": 760,
+    "y": 350,
+    "wires": [[]]
+  },
+  {
+    "id": "fn_gsheet_url_pro",
+    "type": "function",
+    "z": "tab_smart_garage_pro",
+    "name": "⚙️ Set Google Sheets URL",
+    "func": "// PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL BELOW:\nconst GOOGLE_SHEETS_WEBAPP_URL = \"https://script.google.com/macros/s/AKfycbzC-kHrrwcpk074xqur0AUxMxY9rkel48Y2OTWgOSyvJzjbz1NK1k1aUuzoH8td1IEhcg/exec\";\n\nif (!GOOGLE_SHEETS_WEBAPP_URL || GOOGLE_SHEETS_WEBAPP_URL.startsWith(\"PASTE_\")) {\n  // Not configured yet — skip HTTP request cleanly\n  return null;\n}\n\nmsg.url = GOOGLE_SHEETS_WEBAPP_URL;\nmsg.method = \"POST\";\nmsg.headers = { \"Content-Type\": \"application/json\" };\nreturn msg;",
+    "outputs": 1,
+    "x": 760,
+    "y": 410,
+    "wires": [["http_gsheet_post_pro"]]
+  },
+  {
+    "id": "http_gsheet_post_pro",
+    "type": "http request",
+    "z": "tab_smart_garage_pro",
+    "name": "☁️ Send to Google Sheets",
+    "method": "use",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 1030,
+    "y": 410,
+    "wires": [[]]
+  },
+  {
+    "id": "fn_state_manager_pro",
+    "type": "function",
+    "z": "tab_smart_garage_pro",
+    "name": "Dashboard State Manager",
+    "func": "let s = flow.get('garage_state') || {\n  espOnline: false,\n  wifiIp: '---',\n  rssi: 0,\n  slaveOnline: false,\n  gateStatus: 'CLOSED',\n  gateSub: 'Waiting for ESP32...',\n  intrusion: false,\n  masterAlarm: false,\n  manualAlarm: false,\n  totalEntered: 0,\n  totalExited: 0,\n  f1: 0, f1Free: 6, f1Max: 6, activeTrucks: 'None',\n  f2: 0, f2Free: 10, t2: 0, h2: 0, s2: 0, fl2: false, d2: false, f2Fan: false,\n  f3: 0, f3Free: 10, t3: 0, h3: 0, s3: 0, fl3: false, d3: false, f3Fan: false,\n  inside: 0, totalFree: 26, totalMax: 26, occPct: 0,\n  lastUpdate: 'Never',\n  recentLogs: []\n};\n\nconst nowStr = new Date().toLocaleTimeString();\nconst d = msg.payload || {};\n\nif (msg.topic === 'watchdog_offline') {\n  s.espOnline = false;\n  s.slaveOnline = false;\n  s.gateSub = 'Connection Lost (Check Wi-Fi / MQTT)';\n} else if (msg.topic === 'garage/system/status') {\n  if (d.ip) s.wifiIp = d.ip;\n  if (d.status === 'ESP32_ONLINE') s.espOnline = true;\n} else if (msg.topic === 'garage/telemetry') {\n  s.espOnline = true;\n  s.lastUpdate = nowStr;\n  if (d.ip) s.wifiIp = d.ip;\n  if (d.rssi !== undefined) s.rssi = Number(d.rssi);\n  s.slaveOnline = (d.slave_connected === 1);\n\n  s.f1Max = Number(d.f1_max || 6);\n  s.totalMax = Number(d.total_max || 26);\n  s.f1 = Math.max(0, Math.min(s.f1Max, Number(d.f1_cars || 0)));\n  s.f2 = Math.max(0, Math.min(10, Number(d.f2_cars || 0)));\n  s.f3 = Math.max(0, Math.min(10, Number(d.f3_cars || 0)));\n  s.f1Free = s.f1Max - s.f1;\n  s.f2Free = 10 - s.f2;\n  s.f3Free = 10 - s.f3;\n  s.inside = s.f1 + s.f2 + s.f3;\n  s.totalFree = s.totalMax - s.inside;\n  s.occPct = Math.round((s.inside / s.totalMax) * 100);\n  if (d.active_trucks !== undefined) s.activeTrucks = d.active_trucks;\n\n  s.t2 = Number(d.f2_temp || 0);\n  s.h2 = Number(d.f2_hum || 0);\n  s.s2 = Number(d.f2_smoke || 0);\n  s.fl2 = (d.f2_flame === 1);\n  s.d2 = (d.f2_danger === 1) || s.fl2;\n  s.f2Fan = (d.f2_fan === 1);\n\n  s.t3 = Number(d.f3_temp || 0);\n  s.h3 = Number(d.f3_hum || 0);\n  s.s3 = Number(d.f3_smoke || 0);\n  s.fl3 = (d.f3_flame === 1);\n  s.d3 = (d.f3_danger === 1) || s.fl3;\n  s.f3Fan = (d.f3_fan === 1);\n\n  if (d.total_entered !== undefined) s.totalEntered = Number(d.total_entered);\n  if (d.total_exited !== undefined) s.totalExited = Number(d.total_exited);\n  s.gateStatus = d.gate_status || 'CLOSED';\n  s.intrusion = (d.intrusion === 1);\n  s.masterAlarm = (d.master_alarm === 1);\n  if (s.intrusion) s.gateSub = 'SECURITY BREACH!';\n  else if (s.masterAlarm) s.gateSub = 'Emergency Alarm Active';\n  else if (s.gateStatus === 'OPEN') s.gateSub = 'Barrier Open';\n  else if (s.gateSub === 'Waiting for ESP32...' || s.gateSub.startsWith('Connection Lost')) s.gateSub = 'Ready for RFID';\n} else if (msg.topic === 'garage/gate/event') {\n  s.espOnline = true;\n  s.lastUpdate = nowStr;\n  if (d.f1_cars !== undefined) {\n    s.f1 = Math.max(0, Math.min(s.f1Max, Number(d.f1_cars)));\n    s.f1Free = s.f1Max - s.f1;\n    s.inside = s.f1 + s.f2 + s.f3;\n    s.totalFree = s.totalMax - s.inside;\n    s.occPct = Math.round((s.inside / s.totalMax) * 100);\n  }\n  if (d.action === 'TRUCK_ENTER') {\n    s.totalEntered = (d.total_entered !== undefined) ? Number(d.total_entered) : (s.totalEntered + 1);\n    s.gateStatus = 'OPEN';\n    s.gateSub = (d.truck_id || 'TRK') + ' IN • ' + (d.driver || 'Truck');\n  } else if (d.action === 'TRUCK_EXIT') {\n    s.totalExited = (d.total_exited !== undefined) ? Number(d.total_exited) : (s.totalExited + 1);\n    s.gateStatus = 'OPEN';\n    s.gateSub = (d.truck_id || 'TRK') + ' OUT • ' + (d.driver || 'Truck');\n  } else if (d.action === 'ENTER') {\n    s.totalEntered = (d.total_entered !== undefined) ? Number(d.total_entered) : (s.totalEntered + 1);\n    s.gateStatus = 'OPEN';\n    s.gateSub = (d.driver || 'Driver') + ' • ' + (d.type || 'Entry');\n  } else if (d.action === 'EXIT') {\n    s.totalExited = (d.total_exited !== undefined) ? Number(d.total_exited) : (s.totalExited + 1);\n    s.gateStatus = 'OPEN';\n    s.gateSub = 'Vehicle Exiting';\n  } else if (d.action === 'INTRUSION' || d.rfid === 'INTRUSION_ALERT') {\n    s.intrusion = true;\n    s.masterAlarm = true;\n    s.gateSub = 'UNAUTHORIZED ENTRY!';\n  }\n\n  s.recentLogs = s.recentLogs || [];\n  s.recentLogs.unshift({\n    time: nowStr,\n    action: d.action || 'EVENT',\n    truck_id: d.truck_id || 'CAR',\n    rfid: d.rfid || '---',\n    driver: d.driver || 'Unknown',\n    type: d.type || ''\n  });\n  if (s.recentLogs.length > 6) s.recentLogs.pop();\n} else if (msg.topic === 'ui_cmd') {\n  if (d.cmd === 'master_alarm') { s.manualAlarm = !!d.val; s.masterAlarm = s.manualAlarm || s.d2 || s.d3; if (!s.manualAlarm) s.intrusion = false; }\n  if (d.cmd === 'f2_emergency') { s.f2Fan = !!d.val || s.d2; }\n  if (d.cmd === 'f3_emergency') { s.f3Fan = !!d.val || s.d3; }\n}\n\nflow.set('garage_state', s);\nreturn { payload: s };",
+    "outputs": 1,
+    "x": 430,
+    "y": 140,
+    "wires": [["ui_dashboard_pro"]]
+  },
+  {
+    "id": "ui_dashboard_pro",
+    "type": "ui_template",
+    "z": "tab_smart_garage_pro",
+    "group": "ui_group_garage_pro",
+    "name": "Smart Garage Pro UI",
+    "order": 1,
+    "width": 24,
+    "height": 18,
+    "format": "<style>\n  body.nr-dashboard-theme {\n    background: #090e1a !important;\n    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif !important;\n  }\n  body.nr-dashboard-theme md-toolbar {\n    background: linear-gradient(90deg, #0f172a 0%, #1d4ed8 55%, #0284c7 100%) !important;\n    box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;\n  }\n  body.nr-dashboard-theme md-content,\n  .nr-dashboard-theme ui-card-panel,\n  .nr-dashboard-theme md-card {\n    background: transparent !important;\n    box-shadow: none !important;\n    border: none !important;\n    overflow: visible !important;\n  }\n  .nr-dashboard-template { padding: 0 !important; overflow: visible !important; }\n\n  .sg-wrap { max-width: 1420px; margin: 0 auto; padding: 10px 14px 28px; color: #e2e8f0; box-sizing: border-box; }\n  .sg-conn-bar {\n    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;\n    background: linear-gradient(135deg, #111827 0%, #1e293b 100%);\n    border: 1px solid rgba(148,163,184,0.18); border-radius: 16px; padding: 12px 18px; margin-bottom: 16px;\n    box-shadow: 0 8px 24px rgba(0,0,0,0.3);\n  }\n  .sg-conn-group { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }\n  .sg-pill {\n    display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px;\n    font-size: 13px; font-weight: 600; background: rgba(15,23,42,0.8); border: 1px solid rgba(148,163,184,0.2);\n  }\n  .sg-pill.on { border-color: rgba(16,185,129,0.5); color: #6ee7b7; background: rgba(16,185,129,0.12); }\n  .sg-pill.off { border-color: rgba(239,68,68,0.5); color: #fca5a5; background: rgba(239,68,68,0.12); }\n  .sg-pill.info { border-color: rgba(56,189,248,0.4); color: #7dd3fc; background: rgba(56,189,248,0.1); }\n  .sg-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }\n  .sg-dot.green { background: #10b981; box-shadow: 0 0 10px #10b981; animation: pulse 1.8s infinite; }\n  .sg-dot.red { background: #ef4444; box-shadow: 0 0 8px #ef4444; }\n  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }\n  .sg-updated { font-size: 12px; color: #94a3b8; }\n\n  .sg-section {\n    background: #111827; border: 1px solid rgba(148,163,184,0.16); border-radius: 18px;\n    padding: 16px 18px; margin-bottom: 18px; box-shadow: 0 12px 30px rgba(0,0,0,0.32);\n  }\n  .sg-sec-head {\n    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;\n    margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid rgba(148,163,184,0.12);\n  }\n  .sg-sec-title { font-size: 16px; font-weight: 700; color: #f8fafc; }\n  .sg-kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }\n  @media (max-width: 980px) { .sg-kpi-grid { grid-template-columns: repeat(2, 1fr); } }\n  .sg-kpi { background: #1e293b; border: 1px solid rgba(148,163,184,0.14); border-radius: 14px; padding: 14px 12px; text-align: center; }\n  .sg-kpi-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: #94a3b8; margin-bottom: 6px; }\n  .sg-kpi-val { font-size: 24px; font-weight: 800; color: #f8fafc; line-height: 1.15; }\n  .sg-kpi-sub { font-size: 11.5px; color: #94a3b8; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n  .c-green { color: #34d399 !important; }\n  .c-amber { color: #fbbf24 !important; }\n  .c-red   { color: #f87171 !important; }\n  .c-blue  { color: #38bdf8 !important; }\n\n  .sg-zones { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 18px; }\n  @media (max-width: 1020px) { .sg-zones { grid-template-columns: 1fr; } }\n  .sg-card {\n    background: #111827; border: 1px solid rgba(148,163,184,0.16); border-radius: 18px; padding: 18px;\n    display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 12px 30px rgba(0,0,0,0.32);\n  }\n  .sg-card.yard { border-top: 3px solid #f59e0b; }\n  .sg-card.gf   { border-top: 3px solid #10b981; }\n  .sg-card.sf   { border-top: 3px solid #8b5cf6; }\n  .sg-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }\n  .sg-card-title { font-size: 16px; font-weight: 700; color: #f8fafc; }\n  .sg-tag { font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: rgba(148,163,184,0.14); color: #cbd5e1; }\n  .sg-tag.safe   { background: rgba(16,185,129,0.16); color: #34d399; }\n  .sg-tag.danger { background: rgba(239,68,68,0.2);   color: #f87171; }\n  .sg-tag.warn   { background: rgba(245,158,11,0.18); color: #fbbf24; }\n\n  .sg-gauges-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 4px 0 14px; }\n  .sg-gauge-box { background: #1e293b; border-radius: 14px; padding: 12px 8px 10px; text-align: center; border: 1px solid rgba(148,163,184,0.12); }\n  .sg-gauge-title { font-size: 12px; color: #94a3b8; font-weight: 600; margin-bottom: 4px; }\n  .sg-ring-wrap { display: flex; justify-content: center; align-items: center; margin: 8px 0 14px; }\n\n  .sg-rows { background: #1e293b; border-radius: 14px; padding: 8px 14px; margin-bottom: 14px; border: 1px solid rgba(148,163,184,0.12); }\n  .sg-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px dashed rgba(148,163,184,0.14); font-size: 13px; gap: 8px; }\n  .sg-row:last-child { border-bottom: none; }\n  .sg-k { color: #94a3b8; }\n  .sg-v { font-weight: 700; color: #f8fafc; text-align: right; }\n\n  .sg-btn {\n    width: 100%; padding: 11px 16px; border-radius: 12px; border: 1px solid rgba(148,163,184,0.22);\n    background: #1e293b; color: #e2e8f0; font-size: 13.5px; font-weight: 700; cursor: pointer;\n    display: flex; justify-content: space-between; align-items: center; transition: all 0.2s ease;\n  }\n  .sg-btn:hover { background: #273549; border-color: rgba(56,189,248,0.45); }\n  .sg-btn.active-fan { background: rgba(16,185,129,0.2); border-color: #10b981; color: #6ee7b7; }\n  .sg-btn.active-alarm { background: rgba(239,68,68,0.22); border-color: #ef4444; color: #fca5a5; }\n  .sg-btn-pill { padding: 3px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 800; background: rgba(15,23,42,0.7); color: #94a3b8; }\n  .sg-btn.active-fan .sg-btn-pill { background: #10b981; color: #052e16; }\n  .sg-btn.active-alarm .sg-btn-pill { background: #ef4444; color: #fff; }\n\n  .sg-bar-bg { height: 7px; background: #0f172a; border-radius: 99px; overflow: hidden; margin-top: 8px; }\n  .sg-bar-fill { height: 100%; background: linear-gradient(90deg, #38bdf8, #818cf8); border-radius: 99px; transition: width 0.4s ease; }\n\n  .sg-log-table { width: 100%; border-collapse: collapse; font-size: 13px; }\n  .sg-log-table th { text-align: left; color: #94a3b8; font-weight: 600; padding: 8px 10px; border-bottom: 1px solid rgba(148,163,184,0.2); }\n  .sg-log-table td { padding: 8px 10px; border-bottom: 1px dashed rgba(148,163,184,0.12); color: #e2e8f0; }\n  .sg-log-table tr:last-child td { border-bottom: none; }\n</style>\n\n<div class=\"sg-wrap\">\n\n  <!-- LIVE ESP32 & NETWORK CONNECTION BAR -->\n  <div class=\"sg-conn-bar\">\n    <div class=\"sg-conn-group\">\n      <span class=\"sg-pill\" ng-class=\"msg.payload.espOnline ? 'on' : 'off'\">\n        <span class=\"sg-dot\" ng-class=\"msg.payload.espOnline ? 'green' : 'red'\"></span>\n        Master ESP32: {{msg.payload.espOnline ? 'CONNECTED (ONLINE)' : 'DISCONNECTED (OFFLINE)'}}\n      </span>\n      <span class=\"sg-pill\" ng-class=\"msg.payload.espOnline ? 'info' : 'off'\">\n        📶 Wi-Fi / Network: {{msg.payload.espOnline ? ('ONLINE • ' + (msg.payload.wifiIp || '---')) : 'NO CONNECTION'}}\n      </span>\n      <span class=\"sg-pill\" ng-class=\"msg.payload.slaveOnline ? 'on' : 'off'\">\n        <span class=\"sg-dot\" ng-class=\"msg.payload.slaveOnline ? 'green' : 'red'\"></span>\n        Slave ESP32 (UART): {{msg.payload.slaveOnline ? 'SYNCED' : 'OFFLINE'}}\n      </span>\n      <span class=\"sg-pill info\">📊 Excel CSV &amp; Google Sheets Auto-Log</span>\n    </div>\n    <div class=\"sg-updated\">Last Sync: {{msg.payload.lastUpdate || 'Waiting...'}}</div>\n  </div>\n\n  <!-- MAIN GATE & ACCESS STATISTICS -->\n  <div class=\"sg-section\">\n    <div class=\"sg-sec-head\">\n      <div class=\"sg-sec-title\">🚦 Main Gate &amp; Live Access Control</div>\n      <button class=\"sg-btn\" style=\"width:auto; gap:14px; padding:8px 16px;\"\n              ng-class=\"msg.payload.masterAlarm ? 'active-alarm' : ''\"\n              ng-click=\"send({topic:'garage/control/master_alarm', payload: msg.payload.masterAlarm ? '0' : '1', cmd:'master_alarm', val: !msg.payload.masterAlarm})\">\n        <span>🚨 Master Alarm &amp; Strobe (GPIO 2)</span>\n        <span class=\"sg-btn-pill\">{{msg.payload.masterAlarm ? 'ON' : 'OFF'}}</span>\n      </button>\n    </div>\n\n    <div class=\"sg-kpi-grid\">\n      <div class=\"sg-kpi\">\n        <div class=\"sg-kpi-lbl\">Gate Live Status</div>\n        <div class=\"sg-kpi-val\" ng-class=\"msg.payload.intrusion || msg.payload.masterAlarm ? 'c-red' : (msg.payload.gateStatus === 'OPEN' ? 'c-green' : 'c-blue')\">\n          {{msg.payload.intrusion ? 'BREACH!' : (msg.payload.masterAlarm ? 'ALARM' : (msg.payload.gateStatus || 'CLOSED'))}}\n        </div>\n        <div class=\"sg-kpi-sub\">{{msg.payload.gateSub || 'Ready for RFID'}}</div>\n      </div>\n      <div class=\"sg-kpi\">\n        <div class=\"sg-kpi-lbl\">Total Entered</div>\n        <div class=\"sg-kpi-val c-green\">{{msg.payload.totalEntered || 0}}</div>\n        <div class=\"sg-kpi-sub\">Main Entry Gate</div>\n      </div>\n      <div class=\"sg-kpi\">\n        <div class=\"sg-kpi-lbl\">Total Exited</div>\n        <div class=\"sg-kpi-val c-amber\">{{msg.payload.totalExited || 0}}</div>\n        <div class=\"sg-kpi-sub\">Main Exit Gate</div>\n      </div>\n      <div class=\"sg-kpi\">\n        <div class=\"sg-kpi-lbl\">Vehicles Inside Now</div>\n        <div class=\"sg-kpi-val c-blue\">{{msg.payload.inside || 0}} / 26</div>\n        <div class=\"sg-bar-bg\"><div class=\"sg-bar-fill\" ng-style=\"{width: (msg.payload.occPct || 0) + '%'}\"></div></div>\n      </div>\n      <div class=\"sg-kpi\">\n        <div class=\"sg-kpi-lbl\">Available Slots</div>\n        <div class=\"sg-kpi-val\">{{msg.payload.totalFree != null ? msg.payload.totalFree : 26}}</div>\n        <div class=\"sg-kpi-sub\">Occupancy: {{msg.payload.occPct || 0}}%</div>\n      </div>\n    </div>\n  </div>\n\n  <!-- 3 ZONES SYMMETRICAL GRID -->\n  <div class=\"sg-zones\">\n\n    <!-- ZONE 1: TRUCKS YARD (MAX 6 - RFID + MAIN GATE IR) -->\n    <div class=\"sg-card yard\">\n      <div>\n        <div class=\"sg-card-head\">\n          <div class=\"sg-card-title\">🚛 Trucks Yard</div>\n          <span class=\"sg-tag\" ng-class=\"(msg.payload.f1 || 0) >= 6 ? 'danger' : 'safe'\">\n            {{(msg.payload.f1 || 0) >= 6 ? '🔴 FULL' : '☀️ OPEN-AIR'}}\n          </span>\n        </div>\n\n        <div class=\"sg-ring-wrap\">\n          <svg width=\"156\" height=\"156\" viewBox=\"0 0 120 120\">\n            <circle cx=\"60\" cy=\"60\" r=\"48\" fill=\"none\" stroke=\"#1e293b\" stroke-width=\"11\"/>\n            <circle cx=\"60\" cy=\"60\" r=\"48\" fill=\"none\"\n                    ng-attr-stroke=\"{{(msg.payload.f1||0)>=6 ? '#ef4444' : ((msg.payload.f1||0)>=4 ? '#f59e0b' : '#10b981')}}\"\n                    stroke-width=\"11\" stroke-linecap=\"round\"\n                    stroke-dasharray=\"301.6\"\n                    ng-attr-stroke-dashoffset=\"{{301.6 - (301.6 * ((msg.payload.f1||0) / 6))}}\"\n                    transform=\"rotate(-90 60 60)\"/>\n            <text x=\"60\" y=\"57\" text-anchor=\"middle\" fill=\"#f8fafc\" font-size=\"22\" font-weight=\"800\">{{msg.payload.f1 || 0}} / 6</text>\n            <text x=\"60\" y=\"75\" text-anchor=\"middle\" fill=\"#94a3b8\" font-size=\"11\" font-weight=\"600\">TRUCKS</text>\n          </svg>\n        </div>\n\n        <div class=\"sg-rows\">\n          <div class=\"sg-row\"><span class=\"sg-k\">Available Truck Slots</span><span class=\"sg-v c-blue\">{{msg.payload.f1Free != null ? msg.payload.f1Free : 6}} / 6 Free</span></div>\n          <div class=\"sg-row\"><span class=\"sg-k\">Tracking Method</span><span class=\"sg-v c-amber\">RFID + Main Gate IR</span></div>\n          <div class=\"sg-row\"><span class=\"sg-k\">Active Truck IDs</span><span class=\"sg-v c-green\">{{msg.payload.activeTrucks || 'None'}}</span></div>\n        </div>\n      </div>\n      <div class=\"sg-btn\" style=\"cursor:default; justify-content:center; color:#fbbf24; border-color:rgba(245,158,11,0.3);\">\n        ☀️ Outdoor Yard — Each Truck Logged by RFID ID\n      </div>\n    </div>\n\n    <!-- ZONE 2: GROUND FLOOR (2-IR + DHT11 + SMOKE + FAN) -->\n    <div class=\"sg-card gf\">\n      <div>\n        <div class=\"sg-card-head\">\n          <div class=\"sg-card-title\">🚗 Ground Floor</div>\n          <span class=\"sg-tag\" ng-class=\"msg.payload.fl2 || msg.payload.d2 ? 'danger' : (msg.payload.f2Fan ? 'warn' : 'safe')\">\n            {{msg.payload.fl2 ? '🔥 FIRE!' : (msg.payload.d2 ? '⚠️ DANGER' : (msg.payload.f2Fan ? '🌀 FAN ON' : '✅ SAFE'))}}\n          </span>\n        </div>\n\n        <div class=\"sg-gauges-2\">\n          <div class=\"sg-gauge-box\">\n            <div class=\"sg-gauge-title\">🌡️ Temp (DHT11)</div>\n            <svg width=\"116\" height=\"76\" viewBox=\"0 0 120 76\">\n              <path d=\"M 14 66 A 46 46 0 0 1 106 66\" fill=\"none\" stroke=\"#0f172a\" stroke-width=\"11\" stroke-linecap=\"round\"/>\n              <path d=\"M 14 66 A 46 46 0 0 1 106 66\" fill=\"none\"\n                    ng-attr-stroke=\"{{(msg.payload.t2||0)>=45 ? '#ef4444' : ((msg.payload.t2||0)>=35 ? '#f59e0b' : '#10b981')}}\"\n                    stroke-width=\"11\" stroke-linecap=\"round\" stroke-dasharray=\"144.5\"\n                    ng-attr-stroke-dashoffset=\"{{144.5 - (144.5 * Math.min(1, (msg.payload.t2||0) / 60))}}\"/>\n              <text x=\"60\" y=\"60\" text-anchor=\"middle\" fill=\"#f8fafc\" font-size=\"18\" font-weight=\"800\">{{msg.payload.t2 || 0}}°C</text>\n            </svg>\n          </div>\n          <div class=\"sg-gauge-box\">\n            <div class=\"sg-gauge-title\">💨 Smoke / Gas</div>\n            <svg width=\"116\" height=\"76\" viewBox=\"0 0 120 76\">\n              <path d=\"M 14 66 A 46 46 0 0 1 106 66\" fill=\"none\" stroke=\"#0f172a\" stroke-width=\"11\" stroke-linecap=\"round\"/>\n              <path d=\"M 14 66 A 46 46 0 0 1 106 66\" fill=\"none\"\n                    ng-attr-stroke=\"{{(msg.payload.s2||0)>=60 ? '#ef4444' : ((msg.payload.s2||0)>=40 ? '#f59e0b' : '#38bdf8')}}\"\n                    stroke-width=\"11\" stroke-linecap=\"round\" stroke-dasharray=\"144.5\"\n                    ng-attr-stroke-dashoffset=\"{{144.5 - (144.5 * Math.min(1, (msg.payload.s2||0) / 100))}}\"/>\n              <text x=\"60\" y=\"60\" text-anchor=\"middle\" fill=\"#f8fafc\" font-size=\"18\" font-weight=\"800\">{{msg.payload.s2 || 0}}%</text>\n            </svg>\n          </div>\n        </div>\n\n        <div class=\"sg-rows\">\n          <div class=\"sg-row\"><span class=\"sg-k\">🔥 Flame Sensor</span><span class=\"sg-v\" ng-class=\"msg.payload.fl2 ? 'c-red' : 'c-green'\">{{msg.payload.fl2 ? '🔥 FLAME DETECTED!' : '✅ NO FIRE'}}</span></div>\n          <div class=\"sg-row\"><span class=\"sg-k\">💧 Humidity (DHT11)</span><span class=\"sg-v c-blue\">{{msg.payload.h2 || 0}} %</span></div>\n          <div class=\"sg-row\"><span class=\"sg-k\">🚗 Cars Parked (2-IR)</span><span class=\"sg-v\">{{msg.payload.f2 || 0}} / 10</span></div>\n          <div class=\"sg-row\"><span class=\"sg-k\">🅿️ Free Slots</span><span class=\"sg-v c-green\">{{msg.payload.f2Free != null ? msg.payload.f2Free : 10}} Free</span></div>\n        </div>\n      </div>\n\n      <button class=\"sg-btn\" ng-class=\"msg.payload.f2Fan ? 'active-fan' : ''\"\n              ng-click=\"send({topic:'garage/control/f2_emergency', payload: msg.payload.f2Fan ? '0' : '1', cmd:'f2_emergency', val: !msg.payload.f2Fan})\">\n        <span>💨 Exhaust Fan (GPIO 15)</span>\n        <span class=\"sg-btn-pill\">{{msg.payload.f2Fan ? 'ON' : 'OFF'}}</span>\n      </button>\n    </div>\n\n    <!-- ZONE 3: FIRST FLOOR (2-IR + DHT11 + SMOKE + FLAME + FAN) -->\n    <div class=\"sg-card sf\">\n      <div>\n        <div class=\"sg-card-head\">\n          <div class=\"sg-card-title\">🚙 First Floor</div>\n          <span class=\"sg-tag\" ng-class=\"msg.payload.fl3 || msg.payload.d3 ? 'danger' : (msg.payload.f3Fan ? 'warn' : 'safe')\">\n            {{msg.payload.fl3 ? '🔥 FIRE!' : (msg.payload.d3 ? '⚠️ DANGER' : (msg.payload.f3Fan ? '🌀 FAN ON' : '✅ SAFE'))}}\n          </span>\n        </div>\n\n        <div class=\"sg-gauges-2\">\n          <div class=\"sg-gauge-box\">\n            <div class=\"sg-gauge-title\">🌡️ Temp (DHT11)</div>\n            <svg width=\"116\" height=\"76\" viewBox=\"0 0 120 76\">\n              <path d=\"M 14 66 A 46 46 0 0 1 106 66\" fill=\"none\" stroke=\"#0f172a\" stroke-width=\"11\" stroke-linecap=\"round\"/>\n              <path d=\"M 14 66 A 46 46 0 0 1 106 66\" fill=\"none\"\n                    ng-attr-stroke=\"{{(msg.payload.t3||0)>=45 ? '#ef4444' : ((msg.payload.t3||0)>=35 ? '#f59e0b' : '#10b981')}}\"\n                    stroke-width=\"11\" stroke-linecap=\"round\" stroke-dasharray=\"144.5\"\n                    ng-attr-stroke-dashoffset=\"{{144.5 - (144.5 * Math.min(1, (msg.payload.t3||0) / 60))}}\"/>\n              <text x=\"60\" y=\"60\" text-anchor=\"middle\" fill=\"#f8fafc\" font-size=\"18\" font-weight=\"800\">{{msg.payload.t3 || 0}}°C</text>\n            </svg>\n          </div>\n          <div class=\"sg-gauge-box\">\n            <div class=\"sg-gauge-title\">💨 Smoke / Gas</div>\n            <svg width=\"116\" height=\"76\" viewBox=\"0 0 120 76\">\n              <path d=\"M 14 66 A 46 46 0 0 1 106 66\" fill=\"none\" stroke=\"#0f172a\" stroke-width=\"11\" stroke-linecap=\"round\"/>\n              <path d=\"M 14 66 A 46 46 0 0 1 106 66\" fill=\"none\"\n                    ng-attr-stroke=\"{{(msg.payload.s3||0)>=60 ? '#ef4444' : ((msg.payload.s3||0)>=40 ? '#f59e0b' : '#8b5cf6')}}\"\n                    stroke-width=\"11\" stroke-linecap=\"round\" stroke-dasharray=\"144.5\"\n                    ng-attr-stroke-dashoffset=\"{{144.5 - (144.5 * Math.min(1, (msg.payload.s3||0) / 100))}}\"/>\n              <text x=\"60\" y=\"60\" text-anchor=\"middle\" fill=\"#f8fafc\" font-size=\"18\" font-weight=\"800\">{{msg.payload.s3 || 0}}%</text>\n            </svg>\n          </div>\n        </div>\n\n        <div class=\"sg-rows\">\n          <div class=\"sg-row\"><span class=\"sg-k\">🔥 Flame Sensor</span><span class=\"sg-v\" ng-class=\"msg.payload.fl3 ? 'c-red' : 'c-green'\">{{msg.payload.fl3 ? '🔥 FLAME DETECTED!' : '✅ NO FIRE'}}</span></div>\n          <div class=\"sg-row\"><span class=\"sg-k\">💧 Humidity (DHT11)</span><span class=\"sg-v c-blue\">{{msg.payload.h3 || 0}} %</span></div>\n          <div class=\"sg-row\"><span class=\"sg-k\">🚙 Cars Parked (2-IR)</span><span class=\"sg-v\">{{msg.payload.f3 || 0}} / 10</span></div>\n          <div class=\"sg-row\"><span class=\"sg-k\">🅿️ Free Slots</span><span class=\"sg-v c-green\">{{msg.payload.f3Free != null ? msg.payload.f3Free : 10}} Free</span></div>\n        </div>\n      </div>\n\n      <button class=\"sg-btn\" ng-class=\"msg.payload.f3Fan ? 'active-fan' : ''\"\n              ng-click=\"send({topic:'garage/control/f3_emergency', payload: msg.payload.f3Fan ? '0' : '1', cmd:'f3_emergency', val: !msg.payload.f3Fan})\">\n        <span>💨 Exhaust Fan (GPIO 4)</span>\n        <span class=\"sg-btn-pill\">{{msg.payload.f3Fan ? 'ON' : 'OFF'}}</span>\n      </button>\n    </div>\n\n  </div>\n\n  <!-- RECENT TRUCKS & GATE ACTIVITY LOG (SYNCED TO EXCEL & GOOGLE SHEETS) -->\n  <div class=\"sg-section\" style=\"margin-bottom:0;\">\n    <div class=\"sg-sec-head\">\n      <div class=\"sg-sec-title\">📋 Live Trucks &amp; Gate Log (Auto-Saved to Excel CSV &amp; Google Sheets)</div>\n      <span class=\"sg-tag safe\">File: garage_live_log.csv</span>\n    </div>\n    <table class=\"sg-log-table\">\n      <thead>\n        <tr><th>Time</th><th>Action</th><th>Truck / Vehicle ID</th><th>RFID UID</th><th>Driver</th><th>Zone / Type</th></tr>\n      </thead>\n      <tbody>\n        <tr ng-if=\"!msg.payload.recentLogs || msg.payload.recentLogs.length === 0\">\n          <td colspan=\"6\" style=\"text-align:center; color:#64748b; padding:14px;\">Waiting for RFID / Gate activity...</td>\n        </tr>\n        <tr ng-repeat=\"row in msg.payload.recentLogs\">\n          <td>{{row.time}}</td>\n          <td ng-class=\"row.action==='INTRUSION' ? 'c-red' : (row.action.indexOf('EXIT')!==-1 ? 'c-amber' : 'c-green')\" style=\"font-weight:700;\">{{row.action}}</td>\n          <td class=\"c-blue\" style=\"font-weight:700;\">{{row.truck_id}}</td>\n          <td>{{row.rfid}}</td>\n          <td>{{row.driver}}</td>\n          <td>{{row.type}}</td>\n        </tr>\n      </tbody>\n    </table>\n  </div>\n\n</div>",
+    "storeOutMessages": false,
+    "fwdInMessages": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "x": 700,
+    "y": 140,
+    "wires": [
+      ["mqtt_out_control_pro", "fn_ui_feedback_pro"]
+    ]
+  },
+  {
+    "id": "fn_ui_feedback_pro",
+    "type": "function",
+    "z": "tab_smart_garage_pro",
+    "name": "Local Button Feedback",
+    "func": "if (msg.cmd) {\n  return { topic: 'ui_cmd', payload: { cmd: msg.cmd, val: msg.val } };\n}\nreturn null;",
+    "outputs": 1,
+    "x": 690,
+    "y": 200,
+    "wires": [["fn_state_manager_pro"]]
+  },
+  {
+    "id": "mqtt_out_control_pro",
+    "type": "mqtt out",
+    "z": "tab_smart_garage_pro",
+    "name": "Garage Control Out",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "broker": "mqtt_broker_pro",
+    "x": 960,
+    "y": 100,
+    "wires": []
+  }
+]
